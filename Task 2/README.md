@@ -71,14 +71,14 @@ This isn't just another inventory manager — it's a **complete business operati
 
 ## 👀 Visual Tour
 
-| Feature                   | Screenshot                                    | Highlights                                        |
-|---------------------------|-----------------------------------------------|---------------------------------------------------|
-| **Login Security**        | ![Login Screen](IMAGES./Login Screen.png)        | SHA-256 password hashing, role-based access       |
-| **Admin Dashboard**       | ![Main Dashboard](screenshots/dashboard.png)  | Real-time stock alerts, color-coded warnings, instant search |
-| **Sales Processing**      | ![Sell Product](screenshots/sell_product.png) | Auto-calculated totals, stock validation          |
-| **Business Analytics**    | ![Analytics Dashboard](screenshots/analytics.png) | Matplotlib charts, revenue trends, top products   |
-| **Stock Alerts**          | ![Low Stock Alert](screenshots/low_stock.png) | Color-coded urgency levels (red/yellow)           |
-| **PDF Reporting**         | ![Export Dialog](screenshots/export.png)      | Professional exports to PDF/Excel/CSV             |
+| Feature                   | Screenshot                                           | Highlights                                                   |
+|---------------------------|------------------------------------------------------|--------------------------------------------------------------|
+| **Login Security**        | ![Login Screen](Task 2/IMAGES./Login Screen.png)     | SHA-256 password hashing, role-based access                  |
+| **Admin Dashboard**       | ![Main Dashboard](screenshots/dashboard.png)         | Real-time stock alerts, color-coded warnings, instant search |
+| **Sales Processing**      | ![Sell Product](screenshots/sell_product.png)        | Auto-calculated totals, stock validation                     |
+| **Business Analytics**    | ![Analytics Dashboard](screenshots/analytics.png)    | Matplotlib charts, revenue trends, top products              |
+| **Stock Alerts**          | ![Low Stock Alert](screenshots/low_stock.png)        | Color-coded urgency levels (red/yellow)                      |
+| **PDF Reporting**         | ![Export Dialog](screenshots/export.png)             | Professional exports to PDF/Excel/CSV                        |
 
 > 💡 _Click on any screenshot for a closer look (if browsing on GitHub web)_
 
