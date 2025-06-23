@@ -76,7 +76,7 @@ This isn't just another inventory manager — it's a **complete business operati
 | **Login Security**        | ![Login Screen](IMAGES./Login_Screen.png)         | SHA-256 password hashing, role-based access                  |
 | **Admin Dashboard**       | ![Main Dashboard](IMAGES./Main_Dashboard.png)         | Real-time stock alerts, color-coded warnings, instant search |
 | **Sales Processing**      | ![Sell Product](IMAGES./Sales_Processing.png)        | Auto-calculated totals, stock validation                     |
-| **Business Analytics**    | ![Analytics Dashboard](IMAGES./Sales_Analytics_Daily_sales.png) ![](IMAGES./Sales_Analytics_Product_Performance.png) ![](IMAGES./Sales_Analytics_Inventory_Overview.png) ![Sales](IMAGES./Sales.png)    | Matplotlib charts, revenue trends, top products              |
+| **Business Analytics**    | ![Analytics Dashboard](IMAGES./Sales_Analytics_Daily_sales.png) ![](IMAGES./Sales_Analytics_Product_Performance.png) ![](IMAGES./Sales_Analytics_Inventory_Overview.png)                                  | Matplotlib charts, revenue trends, top products              |
 | **Stock Alerts**          | ![Low Stock Alert](IMAGES./Stock_Alert.png)        | Color-coded urgency levels (red/yellow)                      |
 | **PDF Reporting**         | ![Export Dialog](IMAGES./PDF_Reporting.png) ![](IMAGES./Exported_PDF_File.png)             | Professional exports to PDF/Excel/CSV                        |
 
