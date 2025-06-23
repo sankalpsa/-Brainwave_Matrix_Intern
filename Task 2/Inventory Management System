@@ -1,0 +1,1158 @@
+import sys
+import sqlite3
+import hashlib
+from datetime import datetime
+import csv
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import pandas as pd
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import os
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QAction, QMenu, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QDialog, QComboBox, QSpinBox,
+    QTabWidget, QFileDialog, QTreeWidget, QTreeWidgetItem, QHeaderView, QStatusBar, QInputDialog,
+    QAbstractItemView, QSplitter, QGroupBox, QFormLayout
+)
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QColor, QBrush, QFont, QIcon, QPalette
+
+class InventoryApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Advanced Inventory Management System")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Initialize database
+        self.conn = sqlite3.connect('inventory.db')
+        self.cursor = self.conn.cursor()
+        self.create_tables()
+        self.current_user = None
+        self.chart_canvases = {}
+        
+        # Pagination settings
+        self.current_page = 1
+        self.records_per_page = 50
+        self.total_records = 0
+        
+        # Apply styling
+        self.apply_styles()
+        
+        # Initialize UI
+        self.init_menu()
+        self.statusBar().showMessage("Ready")
+        self.show_login()
+
+    def apply_styles(self):
+        # Application-wide stylesheet
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f0f2f5;
+            }
+            QWidget {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                font-size: 10pt;
+            }
+            QLabel {
+                color: #333;
+            }
+            QLineEdit, QComboBox, QSpinBox {
+                background-color: white;
+                border: 1px solid #d1d1d1;
+                border-radius: 4px;
+                padding: 5px;
+                min-height: 25px;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+                border: 1px solid #4d90fe;
+            }
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                min-height: 30px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+            QPushButton#logout {
+                background-color: #f44336;
+            }
+            QPushButton#logout:hover {
+                background-color: #d32f2f;
+            }
+            QPushButton#logout:pressed {
+                background-color: #b71c1c;
+            }
+            QTableWidget {
+                background-color: white;
+                border: 1px solid #d1d1d1;
+                gridline-color: #e0e0e0;
+                selection-background-color: #e3f2fd;
+                selection-color: #333;
+            }
+            QHeaderView::section {
+                background-color: #f1f1f1;
+                padding: 6px;
+                border: none;
+                font-weight: bold;
+            }
+            QTabWidget::pane {
+                border: 1px solid #d1d1d1;
+                background: white;
+            }
+            QTabBar::tab {
+                background: #f1f1f1;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background: white;
+                border-bottom: 2px solid #4CAF50;
+            }
+            QDialog {
+                background-color: white;
+            }
+            QTreeWidget {
+                border: 1px solid #d1d1d1;
+                background-color: white;
+            }
+            QGroupBox {
+                border: 1px solid #d1d1d1;
+                border-radius: 4px;
+                margin-top: 20px;
+                font-weight: bold;
+                padding: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                background-color: white;
+            }
+        """)
+        
+        # Additional styling for specific elements
+        self.setStyleSheet(self.styleSheet() + """
+            QLabel#title {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2c3e50;
+                padding: 10px;
+            }
+            QLabel#subtitle {
+                font-size: 14px;
+                color: #7f8c8d;
+                padding-bottom: 15px;
+            }
+        """)
+
+    def create_tables(self):
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS Users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS Products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            price REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS Sales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            total_price REAL NOT NULL,
+            date TIMESTAMP NOT NULL,
+            FOREIGN KEY(product_id) REFERENCES Products(id))''')
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS ActivityLog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES Users(id))''')
+        self.conn.commit()
+        
+        # Create default admin if not exists
+        admin_password = hashlib.sha256("admin123".encode()).hexdigest()
+        try:
+            self.cursor.execute("INSERT INTO Users (username, password, role) VALUES (?, ?, ?)",
+                                ("admin", admin_password, "admin"))
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            pass  # Admin already exists
+
+    def init_menu(self):
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu('&File')
+        
+        export_inventory_action = QAction('&Export Inventory', self)
+        export_inventory_action.triggered.connect(self.export_inventory)
+        file_menu.addAction(export_inventory_action)
+        
+        export_sales_action = QAction('Export &Sales', self)
+        export_sales_action.triggered.connect(self.export_sales)
+        file_menu.addAction(export_sales_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction('&Exit', self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Tools menu
+        tools_menu = menubar.addMenu('&Tools')
+        
+        analytics_action = QAction('&Sales Analytics', self)
+        analytics_action.triggered.connect(self.show_analytics)
+        tools_menu.addAction(analytics_action)
+        
+        history_action = QAction('View &Sales History', self)
+        history_action.triggered.connect(self.show_sales_history)
+        tools_menu.addAction(history_action)
+        
+        low_stock_action = QAction('&Low Stock Alert', self)
+        low_stock_action.triggered.connect(self.show_low_stock)
+        tools_menu.addAction(low_stock_action)
+        
+        log_action = QAction('View &Activity Log', self)
+        log_action.triggered.connect(self.show_activity_log)
+        tools_menu.addAction(log_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu('&Help')
+        
+        about_action = QAction('&About', self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def log_activity(self, action, details=None):
+        if self.current_user:
+            self.cursor.execute("INSERT INTO ActivityLog (user_id, username, action, details) VALUES (?, ?, ?, ?)",
+                                (self.current_user['id'], self.current_user['username'], action, details))
+            self.conn.commit()
+
+    def show_login(self):
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        layout = QVBoxLayout()
+        layout.setContentsMargins(100, 50, 100, 50)
+        self.central_widget.setLayout(layout)
+        
+        # Title
+        title = QLabel("Inventory Management System")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        # Form container
+        form_group = QGroupBox("Login")
+        form_layout = QVBoxLayout(form_group)
+        
+        # Form
+        form_layout.addWidget(QLabel("Username:"))
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter username")
+        form_layout.addWidget(self.username_input)
+        
+        form_layout.addWidget(QLabel("Password:"))
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter password")
+        self.password_input.setEchoMode(QLineEdit.Password)
+        form_layout.addWidget(self.password_input)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        
+        login_btn = QPushButton("Login")
+        login_btn.clicked.connect(self.login)
+        btn_layout.addWidget(login_btn)
+        
+        register_btn = QPushButton("Register (Admin Only)")
+        register_btn.clicked.connect(self.show_register)
+        btn_layout.addWidget(register_btn)
+        
+        form_layout.addLayout(btn_layout)
+        
+        layout.addWidget(form_group)
+        
+        # Set focus
+        self.username_input.setFocus()
+
+    def show_register(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Register New User")
+        dialog.setFixedSize(400, 300)
+        layout = QVBoxLayout(dialog)
+        
+        layout.addWidget(QLabel("Username:"))
+        username = QLineEdit()
+        username.setPlaceholderText("Enter username")
+        layout.addWidget(username)
+        
+        layout.addWidget(QLabel("Password:"))
+        password = QLineEdit()
+        password.setPlaceholderText("Enter password")
+        password.setEchoMode(QLineEdit.Password)
+        layout.addWidget(password)
+        
+        layout.addWidget(QLabel("Confirm Password:"))
+        confirm = QLineEdit()
+        confirm.setPlaceholderText("Confirm password")
+        confirm.setEchoMode(QLineEdit.Password)
+        layout.addWidget(confirm)
+        
+        layout.addWidget(QLabel("Role:"))
+        role = QComboBox()
+        role.addItems(["admin", "staff"])
+        layout.addWidget(role)
+        
+        btn_layout = QHBoxLayout()
+        btn = QPushButton("Register")
+        btn_layout.addWidget(btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        def do_register():
+            if not username.text() or not password.text():
+                QMessageBox.warning(dialog, "Error", "Username and password are required")
+                return
+            if password.text() != confirm.text():
+                QMessageBox.warning(dialog, "Error", "Passwords do not match")
+                return
+            hashed_pw = hashlib.sha256(password.text().encode()).hexdigest()
+            try:
+                self.cursor.execute("INSERT INTO Users (username, password, role) VALUES (?, ?, ?)",
+                                   (username.text(), hashed_pw, role.currentText()))
+                self.conn.commit()
+                self.log_activity("User Registration", f"Registered new {role.currentText()}: {username.text()}")
+                QMessageBox.information(dialog, "Success", "User registered successfully")
+                dialog.accept()
+            except sqlite3.IntegrityError:
+                QMessageBox.warning(dialog, "Error", "Username already exists")
+        btn.clicked.connect(do_register)
+        dialog.exec_()
+
+    def login(self):
+        username = self.username_input.text()
+        password = self.password_input.text()
+        if not username or not password:
+            QMessageBox.warning(self, "Error", "Both fields are required")
+            return
+        hashed_pw = hashlib.sha256(password.encode()).hexdigest()
+        self.cursor.execute("SELECT * FROM Users WHERE username=? AND password=?", (username, hashed_pw))
+        user = self.cursor.fetchone()
+        if user:
+            self.current_user = {
+                "id": user[0],
+                "username": user[1],
+                "role": user[3]
+            }
+            self.log_activity("Login", "Successful login")
+            self.show_main()
+            self.statusBar().showMessage(f"Logged in as {username} ({user[3]})")
+        else:
+            QMessageBox.warning(self, "Error", "Invalid credentials")
+            self.log_activity("Login Attempt", "Failed login attempt")
+
+    def show_main(self):
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        self.central_widget.setLayout(main_layout)
+        
+        # Header
+        header_layout = QHBoxLayout()
+        header = QLabel(f"Logged in as: {self.current_user['username']} ({self.current_user['role']})")
+        header.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        header_layout.addWidget(header)
+        
+        logout_btn = QPushButton("Logout")
+        logout_btn.setObjectName("logout")
+        logout_btn.clicked.connect(self.logout)
+        header_layout.addStretch()
+        header_layout.addWidget(logout_btn)
+        main_layout.addLayout(header_layout)
+        
+        # Search bar
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search products...")
+        self.search_input.textChanged.connect(self.filter_products)
+        search_layout.addWidget(self.search_input)
+        
+        main_layout.addLayout(search_layout)
+        
+        # Product Table
+        self.product_table = QTableWidget()
+        self.product_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.product_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.product_table.setSortingEnabled(True)
+        main_layout.addWidget(self.product_table)
+        
+        # Pagination controls
+        pagination_layout = QHBoxLayout()
+        pagination_layout.addStretch()
+        
+        self.prev_btn = QPushButton("◀ Previous")
+        self.prev_btn.clicked.connect(self.prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+        
+        self.page_label = QLabel("Page 1 of 1")
+        pagination_layout.addWidget(self.page_label)
+        
+        self.next_btn = QPushButton("Next ▶")
+        self.next_btn.clicked.connect(self.next_page)
+        pagination_layout.addWidget(self.next_btn)
+        
+        pagination_layout.addStretch()
+        main_layout.addLayout(pagination_layout)
+        
+        # Refresh products
+        self.refresh_product_table()
+        
+        # Controls
+        controls_layout = QHBoxLayout()
+        
+        if self.current_user["role"] == "admin":
+            add_btn = QPushButton("Add Product")
+            add_btn.clicked.connect(self.show_add_product)
+            controls_layout.addWidget(add_btn)
+            
+            del_btn = QPushButton("Delete Selected")
+            del_btn.clicked.connect(self.delete_product)
+            controls_layout.addWidget(del_btn)
+            
+            reg_btn = QPushButton("Register User")
+            reg_btn.clicked.connect(self.show_register)
+            controls_layout.addWidget(reg_btn)
+        
+        controls_layout.addStretch()
+        
+        sell_btn = QPushButton("Sell Product")
+        sell_btn.clicked.connect(self.show_sell_product)
+        controls_layout.addWidget(sell_btn)
+        
+        main_layout.addLayout(controls_layout)
+
+    def refresh_product_table(self):
+        # Get total records
+        self.cursor.execute("SELECT COUNT(*) FROM Products")
+        self.total_records = self.cursor.fetchone()[0]
+        
+        # Calculate total pages
+        total_pages = max(1, (self.total_records + self.records_per_page - 1) // self.records_per_page)
+        self.current_page = min(self.current_page, total_pages)
+        
+        # Update pagination controls
+        self.page_label.setText(f"Page {self.current_page} of {total_pages}")
+        self.prev_btn.setEnabled(self.current_page > 1)
+        self.next_btn.setEnabled(self.current_page < total_pages)
+        
+        # Calculate offset
+        offset = (self.current_page - 1) * self.records_per_page
+        
+        # Fetch data with pagination
+        self.cursor.execute(f"""
+            SELECT id, name, quantity, price, created_at 
+            FROM Products 
+            ORDER BY id 
+            LIMIT {self.records_per_page} OFFSET {offset}
+        """)
+        products = self.cursor.fetchall()
+        
+        # Configure table
+        self.product_table.setRowCount(len(products))
+        self.product_table.setColumnCount(5)
+        self.product_table.setHorizontalHeaderLabels(["ID", "Product Name", "Quantity", "Price ($)", "Created At"])
+        self.product_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.product_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.product_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.product_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.product_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        
+        # Populate table
+        for row, product in enumerate(products):
+            for col, value in enumerate(product):
+                item = QTableWidgetItem(str(value))
+                item.setData(Qt.UserRole, product[0])  # Store ID in user data
+                
+                # Color code low stock
+                if col == 2:  # Quantity column
+                    quantity = product[2]
+                    if quantity < 5:
+                        item.setBackground(QColor(255, 204, 204))  # Light red
+                    elif quantity < 10:
+                        item.setBackground(QColor(255, 255, 204))  # Light yellow
+                
+                self.product_table.setItem(row, col, item)
+
+    def prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.refresh_product_table()
+
+    def next_page(self):
+        total_pages = max(1, (self.total_records + self.records_per_page - 1) // self.records_per_page)
+        if self.current_page < total_pages:
+            self.current_page += 1
+            self.refresh_product_table()
+
+    def filter_products(self):
+        search_term = self.search_input.text().lower()
+        
+        # Reset pagination when searching
+        self.current_page = 1
+        self.refresh_product_table()
+        
+        # Apply filtering
+        for row in range(self.product_table.rowCount()):
+            product_name = self.product_table.item(row, 1).text().lower()
+            if search_term and search_term not in product_name:
+                self.product_table.setRowHidden(row, True)
+            else:
+                self.product_table.setRowHidden(row, False)
+
+    def logout(self):
+        self.log_activity("Logout", "User logged out")
+        self.current_user = None
+        self.current_page = 1  # Reset pagination
+        self.show_login()
+        self.statusBar().showMessage("Logged out")
+
+    def show_add_product(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add New Product")
+        dialog.setFixedSize(400, 250)
+        layout = QVBoxLayout(dialog)
+        
+        layout.addWidget(QLabel("Product Name:"))
+        name = QLineEdit()
+        name.setPlaceholderText("Enter product name")
+        layout.addWidget(name)
+        
+        layout.addWidget(QLabel("Quantity:"))
+        quantity = QSpinBox()
+        quantity.setRange(0, 100000)
+        quantity.setValue(10)
+        layout.addWidget(quantity)
+        
+        layout.addWidget(QLabel("Price ($):"))
+        price = QLineEdit()
+        price.setPlaceholderText("Enter price")
+        layout.addWidget(price)
+        
+        btn_layout = QHBoxLayout()
+        btn = QPushButton("Add Product")
+        btn_layout.addWidget(btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        def do_add():
+            try:
+                q = quantity.value()
+                p = float(price.text())
+                if not name.text() or p <= 0:
+                    raise ValueError
+            except ValueError:
+                QMessageBox.warning(dialog, "Error", "Invalid input. Name required, price must be positive number.")
+                return
+            
+            try:
+                self.cursor.execute("INSERT INTO Products (name, quantity, price) VALUES (?, ?, ?)",
+                                    (name.text(), q, p))
+                self.conn.commit()
+                self.log_activity("Add Product", f"Added: {name.text()} (Qty: {q}, Price: ${p:.2f})")
+                QMessageBox.information(dialog, "Success", "Product added successfully")
+                dialog.accept()
+                self.refresh_product_table()
+            except Exception as e:
+                QMessageBox.warning(dialog, "Database Error", f"Failed to add product: {str(e)}")
+        btn.clicked.connect(do_add)
+        dialog.exec_()
+
+    def delete_product(self):
+        row = self.product_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Error", "Please select a product to delete")
+            return
+            
+        product_id = self.product_table.item(row, 0).text()
+        product_name = self.product_table.item(row, 1).text()
+        
+        reply = QMessageBox.question(self, "Confirm", f"Delete {product_name}?", 
+                                    QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                self.cursor.execute("DELETE FROM Products WHERE id=?", (product_id,))
+                self.conn.commit()
+                self.log_activity("Delete Product", f"Deleted: {product_name}")
+                self.refresh_product_table()
+                QMessageBox.information(self, "Success", "Product deleted successfully")
+            except Exception as e:
+                QMessageBox.warning(self, "Database Error", f"Failed to delete product: {str(e)}")
+
+    def show_sell_product(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Sell Product")
+        dialog.setFixedSize(450, 300)
+        layout = QVBoxLayout(dialog)
+        
+        # Get products
+        self.cursor.execute("SELECT id, name, price, quantity FROM Products WHERE quantity > 0")
+        products = self.cursor.fetchall()
+        
+        if not products:
+            QMessageBox.warning(self, "Error", "No products available to sell")
+            return
+            
+        layout.addWidget(QLabel("Select Product:"))
+        product_combo = QComboBox()
+        for p in products:
+            product_combo.addItem(f"{p[1]} (${p[2]:.2f}) - {p[3]} in stock", (p[0], p[2], p[3]))
+        layout.addWidget(product_combo)
+        
+        # Price display
+        price_layout = QHBoxLayout()
+        price_layout.addWidget(QLabel("Unit Price:"))
+        self.price_label = QLabel("$0.00")
+        price_layout.addWidget(self.price_label)
+        price_layout.addStretch()
+        layout.addLayout(price_layout)
+        
+        # Set initial price
+        if products:
+            self.price_label.setText(f"${products[0][2]:.2f}")
+        
+        layout.addWidget(QLabel("Quantity:"))
+        quantity = QSpinBox()
+        quantity.setRange(1, 10000)
+        quantity.setValue(1)
+        quantity.valueChanged.connect(lambda: self.calculate_total(quantity.value(), product_combo))
+        layout.addWidget(quantity)
+        
+        # Total price
+        total_layout = QHBoxLayout()
+        total_layout.addWidget(QLabel("Total Price:"))
+        self.total_label = QLabel("$0.00")
+        self.total_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        total_layout.addWidget(self.total_label)
+        total_layout.addStretch()
+        layout.addLayout(total_layout)
+        
+        # Calculate initial total
+        self.calculate_total(1, product_combo)
+        
+        # Product change handler
+        product_combo.currentIndexChanged.connect(
+            lambda: self.update_price_display(quantity.value(), product_combo)
+        )
+        
+        btn_layout = QHBoxLayout()
+        btn = QPushButton("Process Sale")
+        btn_layout.addWidget(btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        def do_sell():
+            idx = product_combo.currentIndex()
+            if idx < 0:
+                return
+                
+            product_id, price, available = product_combo.itemData(idx)
+            q = quantity.value()
+            
+            if q > available:
+                QMessageBox.warning(dialog, "Error", f"Insufficient stock. Only {available} available")
+                return
+                
+            new_quantity = available - q
+            total_price = price * q
+            product_name = product_combo.currentText().split(' ($')[0]
+            
+            try:
+                # Update product quantity
+                self.cursor.execute("UPDATE Products SET quantity=? WHERE id=?", (new_quantity, product_id))
+                
+                # Record sale
+                sale_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.cursor.execute("""
+                    INSERT INTO Sales (product_id, product_name, quantity, total_price, date) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (product_id, product_name, q, total_price, sale_date))
+                
+                self.conn.commit()
+                self.log_activity("Sale Processed", f"Sold {q} of {product_name} for ${total_price:.2f}")
+                QMessageBox.information(dialog, "Success", 
+                                       f"Sale processed successfully!\nTotal: ${total_price:.2f}")
+                dialog.accept()
+                self.refresh_product_table()
+            except Exception as e:
+                QMessageBox.warning(dialog, "Database Error", f"Failed to process sale: {str(e)}")
+        btn.clicked.connect(do_sell)
+        dialog.exec_()
+
+    def update_price_display(self, quantity, product_combo):
+        idx = product_combo.currentIndex()
+        if idx < 0:
+            return
+            
+        _, price, _ = product_combo.itemData(idx)
+        self.price_label.setText(f"${price:.2f}")
+        self.calculate_total(quantity, product_combo)
+
+    def calculate_total(self, quantity, product_combo):
+        idx = product_combo.currentIndex()
+        if idx < 0:
+            self.total_label.setText("$0.00")
+            return
+            
+        _, price, _ = product_combo.itemData(idx)
+        total = price * quantity
+        self.total_label.setText(f"${total:.2f}")
+
+    def show_analytics(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Sales Analytics Dashboard")
+        dialog.resize(1000, 700)
+        layout = QVBoxLayout(dialog)
+        
+        # Create tabs
+        tab_widget = QTabWidget()
+        
+        # Daily Sales Tab
+        daily_tab = QWidget()
+        daily_layout = QVBoxLayout(daily_tab)
+        self.daily_canvas = FigureCanvas(plt.figure(figsize=(10, 5)))
+        daily_layout.addWidget(self.daily_canvas)
+        tab_widget.addTab(daily_tab, "Daily Sales")
+        
+        # Product Performance Tab
+        product_tab = QWidget()
+        product_layout = QVBoxLayout(product_tab)
+        self.product_canvas = FigureCanvas(plt.figure(figsize=(12, 5)))
+        product_layout.addWidget(self.product_canvas)
+        tab_widget.addTab(product_tab, "Product Performance")
+        
+        # Inventory Overview Tab
+        inventory_tab = QWidget()
+        inventory_layout = QVBoxLayout(inventory_tab)
+        self.inventory_canvas = FigureCanvas(plt.figure(figsize=(12, 5)))
+        inventory_layout.addWidget(self.inventory_canvas)
+        tab_widget.addTab(inventory_tab, "Inventory Overview")
+        
+        layout.addWidget(tab_widget)
+        
+        # Refresh button
+        refresh_btn = QPushButton("Refresh Charts")
+        refresh_btn.clicked.connect(self.refresh_analytics_charts)
+        layout.addWidget(refresh_btn)
+        
+        # Draw initial charts
+        self.refresh_analytics_charts()
+        
+        dialog.exec_()
+
+    def refresh_analytics_charts(self):
+        # Clear existing figures
+        for fig in [self.daily_canvas.figure, self.product_canvas.figure, self.inventory_canvas.figure]:
+            fig.clf()
+        
+        # Create new charts
+        self.create_daily_sales_chart(self.daily_canvas.figure)
+        self.create_product_performance_chart(self.product_canvas.figure)
+        self.create_inventory_chart(self.inventory_canvas.figure)
+        
+        # Redraw canvases
+        self.daily_canvas.draw()
+        self.product_canvas.draw()
+        self.inventory_canvas.draw()
+
+    def create_daily_sales_chart(self, fig):
+        ax = fig.add_subplot(111)
+        
+        # Fetch daily sales data
+        self.cursor.execute("""
+            SELECT date(date) as sale_date, SUM(total_price) as total_sales
+            FROM Sales
+            GROUP BY sale_date
+            ORDER BY sale_date
+        """)
+        sales_data = self.cursor.fetchall()
+        
+        if not sales_data:
+            ax.text(0.5, 0.5, "No sales data available", ha='center', va='center')
+            return
+        
+        dates = [row[0] for row in sales_data]
+        sales = [row[1] for row in sales_data]
+        
+        ax.bar(dates, sales, color='skyblue')
+        ax.set_title('Daily Sales Revenue', fontsize=14)
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Total Sales ($)', fontsize=12)
+        ax.tick_params(axis='x', rotation=45)
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        # Add data labels
+        for i, v in enumerate(sales):
+            ax.text(i, v + max(sales)*0.02, f"${v:.2f}", ha='center', fontsize=9)
+        
+        fig.tight_layout()
+
+    def create_product_performance_chart(self, fig):
+        # Fetch product sales data
+        self.cursor.execute("""
+            SELECT product_name, SUM(quantity) as total_quantity, SUM(total_price) as total_revenue
+            FROM Sales
+            GROUP BY product_id
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        """)
+        product_data = self.cursor.fetchall()
+        
+        if not product_data:
+            ax = fig.add_subplot(111)
+            ax.text(0.5, 0.5, "No product sales data available", ha='center', va='center')
+            return
+        
+        products = [row[0] for row in product_data]
+        quantities = [row[1] for row in product_data]
+        revenues = [row[2] for row in product_data]
+        
+        # Create subplots
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+        
+        # Quantity sold chart
+        ax1.barh(products, quantities, color='lightgreen')
+        ax1.set_title('Top Selling Products (Quantity)', fontsize=14)
+        ax1.set_xlabel('Units Sold', fontsize=12)
+        ax1.invert_yaxis()  # Top product at top
+        # Add labels to bars
+        for i, v in enumerate(quantities):
+            ax1.text(v + max(quantities)*0.02, i, str(v), color='black', va='center')
+        
+        # Revenue chart
+        ax2.barh(products, revenues, color='salmon')
+        ax2.set_title('Top Selling Products (Revenue)', fontsize=14)
+        ax2.set_xlabel('Total Revenue ($)', fontsize=12)
+        ax2.invert_yaxis()  # Top product at top
+        # Add labels to bars
+        for i, v in enumerate(revenues):
+            ax2.text(v + max(revenues)*0.02, i, f"${v:.2f}", color='black', va='center')
+        
+        fig.tight_layout()
+
+    def create_inventory_chart(self, fig):
+        # Fetch inventory data
+        self.cursor.execute("""
+            SELECT name, quantity, price
+            FROM Products
+            ORDER BY quantity
+        """)
+        inventory_data = self.cursor.fetchall()
+        
+        if not inventory_data:
+            ax = fig.add_subplot(111)
+            ax.text(0.5, 0.5, "No inventory data available", ha='center', va='center')
+            return
+        
+        products = [row[0] for row in inventory_data]
+        quantities = [row[1] for row in inventory_data]
+        values = [row[1] * row[2] for row in inventory_data]  # Inventory value
+        
+        # Create subplots
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+        
+        # Quantity chart
+        ax1.barh(products, quantities, color='lightblue')
+        ax1.set_title('Inventory Levels', fontsize=14)
+        ax1.set_xlabel('Quantity', fontsize=12)
+        # Add labels to bars
+        for i, v in enumerate(quantities):
+            ax1.text(v + max(quantities)*0.02, i, str(v), color='black', va='center')
+        
+        # Value chart
+        ax2.barh(products, values, color='gold')
+        ax2.set_title('Inventory Value', fontsize=14)
+        ax2.set_xlabel('Value ($)', fontsize=12)
+        # Add labels to bars
+        for i, v in enumerate(values):
+            ax2.text(v + max(values)*0.02, i, f"${v:.2f}", color='black', va='center')
+        
+        fig.tight_layout()
+
+    def show_sales_history(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Sales History")
+        dialog.resize(800, 600)
+        layout = QVBoxLayout(dialog)
+        
+        # Create tree widget
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["ID", "Date", "Product", "Quantity", "Total Price"])
+        tree.setColumnWidth(0, 50)
+        tree.setColumnWidth(1, 150)
+        tree.setColumnWidth(2, 200)
+        tree.setColumnWidth(3, 80)
+        tree.setColumnWidth(4, 100)
+        
+        # Load data
+        self.cursor.execute("SELECT id, date, product_name, quantity, total_price FROM Sales ORDER BY date DESC")
+        sales = self.cursor.fetchall()
+        
+        for sale in sales:
+            item = QTreeWidgetItem([
+                str(sale[0]), 
+                sale[1], 
+                sale[2], 
+                str(sale[3]), 
+                f"${sale[4]:.2f}"
+            ])
+            tree.addTopLevelItem(item)
+        
+        layout.addWidget(tree)
+        
+        # Add total sales label
+        self.cursor.execute("SELECT SUM(total_price) FROM Sales")
+        total_sales = self.cursor.fetchone()[0] or 0
+        total_label = QLabel(f"Total Sales: ${total_sales:.2f}")
+        total_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(total_label)
+        
+        dialog.exec_()
+
+    def show_low_stock(self):
+        # Fetch low stock items (less than 10 in stock)
+        self.cursor.execute("SELECT name, quantity FROM Products WHERE quantity < 10 ORDER BY quantity")
+        low_stock = self.cursor.fetchall()
+        
+        if not low_stock:
+            QMessageBox.information(self, "Low Stock", "No products are low in stock!")
+            return
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Low Stock Alert")
+        dialog.resize(400, 300)
+        layout = QVBoxLayout(dialog)
+        
+        title = QLabel("Low Stock Items (Quantity < 10)")
+        title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(title)
+        
+        # Create tree widget
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Product", "Quantity"])
+        tree.setColumnWidth(0, 250)
+        tree.setColumnWidth(1, 80)
+        
+        for item in low_stock:
+            # CORRECTED: Removed extra brackets
+            product_item = QTreeWidgetItem([item[0], str(item[1])])
+            
+            # Color coding
+            if item[1] < 5:
+                product_item.setBackground(0, QBrush(QColor(255, 204, 204)))  # Light red
+                product_item.setBackground(1, QBrush(QColor(255, 204, 204)))
+            else:
+                product_item.setBackground(0, QBrush(QColor(255, 255, 204)))  # Light yellow
+                product_item.setBackground(1, QBrush(QColor(255, 255, 204)))
+                
+            tree.addTopLevelItem(product_item)
+        
+        layout.addWidget(tree)
+        dialog.exec_()
+
+    def show_activity_log(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Activity Log")
+        dialog.resize(800, 600)
+        layout = QVBoxLayout(dialog)
+        
+        # Create tree widget
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Timestamp", "User", "Action", "Details"])
+        tree.setColumnWidth(0, 150)
+        tree.setColumnWidth(1, 100)
+        tree.setColumnWidth(2, 150)
+        tree.setColumnWidth(3, 300)
+        
+        # Load data
+        self.cursor.execute("SELECT timestamp, username, action, details FROM ActivityLog ORDER BY timestamp DESC")
+        logs = self.cursor.fetchall()
+        
+        for log in logs:
+            item = QTreeWidgetItem([log[0], log[1], log[2], log[3] or ""])
+            tree.addTopLevelItem(item)
+        
+        layout.addWidget(tree)
+        dialog.exec_()
+
+    def export_inventory(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Inventory", "", 
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;PDF Files (*.pdf)"
+        )
+        
+        if not file_path:
+            return
+        
+        # Fetch inventory data
+        self.cursor.execute("SELECT id, name, quantity, price FROM Products")
+        inventory = self.cursor.fetchall()
+        columns = ["ID", "Product Name", "Quantity", "Price"]
+        
+        try:
+            if file_path.endswith('.csv'):
+                self.export_to_csv(file_path, columns, inventory)
+            elif file_path.endswith('.xlsx'):
+                self.export_to_excel(file_path, columns, inventory, "Inventory")
+            elif file_path.endswith('.pdf'):
+                self.export_to_pdf(file_path, columns, inventory, "Inventory Report")
+            
+            self.log_activity("Export", f"Exported inventory to {os.path.basename(file_path)}")
+            QMessageBox.information(self, "Export Successful", f"Inventory exported to:\n{file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Error", f"Failed to export: {str(e)}")
+
+    def export_sales(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Sales", "", 
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;PDF Files (*.pdf)"
+        )
+        
+        if not file_path:
+            return
+        
+        # Fetch sales data
+        self.cursor.execute("SELECT date, product_name, quantity, total_price FROM Sales")
+        sales = self.cursor.fetchall()
+        columns = ["Date", "Product", "Quantity", "Total Price"]
+        
+        try:
+            if file_path.endswith('.csv'):
+                self.export_to_csv(file_path, columns, sales)
+            elif file_path.endswith('.xlsx'):
+                self.export_to_excel(file_path, columns, sales, "Sales History")
+            elif file_path.endswith('.pdf'):
+                self.export_to_pdf(file_path, columns, sales, "Sales Report")
+            
+            self.log_activity("Export", f"Exported sales to {os.path.basename(file_path)}")
+            QMessageBox.information(self, "Export Successful", f"Sales history exported to:\n{file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Error", f"Failed to export: {str(e)}")
+
+    def export_to_csv(self, file_path, columns, data):
+        with open(file_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            writer.writerows(data)
+
+    def export_to_excel(self, file_path, columns, data, sheet_name):
+        df = pd.DataFrame(data, columns=columns)
+        df.to_excel(file_path, sheet_name=sheet_name, index=False)
+
+    def export_to_pdf(self, file_path, columns, data, title):
+        doc = SimpleDocTemplate(file_path, pagesize=letter)
+        elements = []
+        
+        # Title
+        styles = getSampleStyleSheet()
+        elements.append(Paragraph(title, styles['Title']))
+        elements.append(Spacer(1, 12))
+        
+        # Create table
+        table_data = [columns] + list(data)
+        table = Table(table_data, colWidths=[60, 200, 60, 60])  # Set column widths
+        
+        # Style the table
+        style = TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ])
+        table.setStyle(style)
+        
+        elements.append(table)
+        
+        # Footer
+        elements.append(Spacer(1, 12))
+        elements.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        
+        doc.build(elements)
+
+    def show_about(self):
+        about_text = (
+            "<h2>Advanced Inventory Management System</h2>"
+            "<p>Version: 3.0</p>"
+            "<p>Developed with Python and PyQt5</p>"
+            "<h3>Features:</h3>"
+            "<ul>"
+            "<li>User Authentication & Role Management</li>"
+            "<li>Product Inventory Management</li>"
+            "<li>Sales Processing & Tracking</li>"
+            "<li>Live Sales Analytics Dashboard</li>"
+            "<li>Data Export (CSV, Excel, PDF)</li>"
+            "<li>Activity Logging</li>"
+            "<li>Low Stock Alerts</li>"
+            "<li>Modern UI with Styling</li>"
+            "<li>Pagination for Large Datasets</li>"
+            "</ul>"
+            "<p>© 2023 Inventory Solutions</p>"
+        )
+        QMessageBox.about(self, "About", about_text)
+
+    def closeEvent(self, event):
+        self.conn.close()
+        event.accept()
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    
+    # Set application style
+    app.setStyle("Fusion")
+    
+    # Create and show main window
+    window = InventoryApp()
+    window.show()
+    sys.exit(app.exec_())
