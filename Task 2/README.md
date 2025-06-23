@@ -73,7 +73,7 @@ This isn't just another inventory manager — it's a **complete business operati
 
 | Feature                   | Screenshot                                           | Highlights                                                   |
 |---------------------------|------------------------------------------------------|--------------------------------------------------------------|
-| **Login Security**        | [![Login Screen](IMAGES/Login_Screen.png)         | SHA-256 password hashing, role-based access                  |
+| **Login Security**        | [![Login Screen](IMAGES./Login_Screen.png)         | SHA-256 password hashing, role-based access                  |
 | **Admin Dashboard**       | ![Main Dashboard](screenshots/dashboard.png)         | Real-time stock alerts, color-coded warnings, instant search |
 | **Sales Processing**      | ![Sell Product](screenshots/sell_product.png)        | Auto-calculated totals, stock validation                     |
 | **Business Analytics**    | ![Analytics Dashboard](screenshots/analytics.png)    | Matplotlib charts, revenue trends, top products              |
