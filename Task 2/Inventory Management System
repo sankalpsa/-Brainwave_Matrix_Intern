@@ -1124,7 +1124,6 @@ class InventoryApp(QMainWindow):
     def show_about(self):
         about_text = (
             "<h2>Advanced Inventory Management System</h2>"
-            "<p>Version: 3.0</p>"
             "<p>Developed with Python and PyQt5</p>"
             "<h3>Features:</h3>"
             "<ul>"
@@ -1138,7 +1137,7 @@ class InventoryApp(QMainWindow):
             "<li>Modern UI with Styling</li>"
             "<li>Pagination for Large Datasets</li>"
             "</ul>"
-            "<p>© 2023 Inventory Solutions</p>"
+            "<p>Developed By Sankalp B Chandavarkar</p>"
         )
         QMessageBox.about(self, "About", about_text)
 
